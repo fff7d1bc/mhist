@@ -1,0 +1,7 @@
+function mhist_record()
+    fp = io.popen("{{ mhist_script }} record --from-stdin", "w")
+    fp:write(mp.get_property('path'))
+    fp:close()
+end
+
+mp.register_event("file-loaded", mhist_record)
