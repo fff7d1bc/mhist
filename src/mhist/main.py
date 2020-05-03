@@ -102,7 +102,7 @@ def main_record(config, args):
     if args.from_stdin:
         records = sys.stdin.read().splitlines()
     elif args.from_string:
-        records = list(args.from_string)
+        records = [args.from_string]
     else:
         raise
 
