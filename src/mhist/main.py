@@ -53,23 +53,21 @@ def process_args():
         help="When --fuzzy is in use, accept entries that reach >= N partial ratio. Default is 63."
     )
 
-    query_required_exclusive_parent = query_parser.add_argument_group('Required either of')
-    query_required_exclusive = query_required_exclusive_parent.add_mutually_exclusive_group(required=True)
-
-    query_required_exclusive.add_argument(
-        '--fuzzy', action='store', type=str,
+    query_parser.add_argument(
+        '--fuzzy', action='store_true',
         help="Case insensitive fuzzy search, processes list from newest to oldest entry."
     )
 
-    query_required_exclusive.add_argument(
-        '--with-words', action='store', type=str,
+    query_parser.add_argument(
+        '--latest', action='store_true',
+        help="List latest entries, don't query string'"
+    )
+
+    query_parser.add_argument(
+        'query_string', nargs='*', type=str,
         help="Split passed string by spaces, check if all of the words are present in entry, in any order and case insensitive."
     )
 
-    query_required_exclusive.add_argument(
-        '--last', action='store_true',
-        help="List last entries"
-    )
 
     deploy_parser = subparsers.add_parser('deploy', help='Control integration with mpv')
     deploy_required_exclusive_parent = deploy_parser.add_argument_group('Required either of')
@@ -103,6 +101,10 @@ def process_args():
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
+
+
+    if args.subparser == 'query' and not (args.query_string or args.latest):
+        parser.error("query string or --latest needs to be passed.")
 
     return args, extra_args
 
@@ -247,7 +249,7 @@ def main_query(config, args):
 
     records.extend(per_host_records)
 
-    if args.last:
+    if args.latest:
         if args.limit != 0:
             # Limit to only N last records.
             records = records[-args.limit:]
@@ -264,11 +266,11 @@ def main_query(config, args):
 
                 record = records[idx]
                 entry = record.split(' ', 2)[2]
-                if fuzz.partial_ratio(args.fuzzy.lower(), entry.lower()) >= args.fuzzy_ratio:
+                if fuzz.partial_ratio(" ".join(args.query_string).lower(), entry.lower()) >= args.fuzzy_ratio:
                     matched += 1
                     print_record(record)
 
-        elif args.with_words:
+        else:
             for idx in range(len(records) - 1, -1, -1):
                 if args.limit > 0 and matched == args.limit:
                     break
@@ -276,9 +278,7 @@ def main_query(config, args):
                 record = records[idx]
                 entry = record.split(' ', 2)[2].lower()
 
-                words = args.with_words.lower().split(' ')
-
-                if all(word in entry for word in words):
+                if all(word.lower() in entry for word in args.query_string):
                     matched += 1
                     print_record(record)
 
