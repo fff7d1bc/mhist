@@ -1,7 +1,7 @@
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path, PurePath
 from platform import node as get_hostname
 
@@ -85,6 +85,15 @@ def process_args():
         help="Remove ~/.mpv/scripts/mhist.lua."
     )
 
+    maintenance_parser = subparsers.add_parser('maintenance', help='The maintenance tasks')
+    maintenance_required_exclusive_parent = maintenance_parser.add_argument_group('Required either of')
+    maintenance_required_exclusive = maintenance_required_exclusive_parent.add_mutually_exclusive_group(required=True)
+
+    maintenance_required_exclusive.add_argument(
+        '--rebuild-common', action='store_true',
+        help="Rebuild the common/initial_records with per-host files older than 31 days."
+    )
+
     args, extra_args = parser.parse_known_args()
     if extra_args:
         if extra_args[0] != '--':
@@ -109,7 +118,7 @@ def main_record(config, args):
     date_now = datetime.now()
 
     data_dir = Path().joinpath(
-        config['mhist_root'], 'data', 'per-host', get_hostname()
+        config['per_host_path'],  get_hostname()
     )
 
     if not data_dir.is_dir():
@@ -185,28 +194,53 @@ def slice_record(record):
     }
 
 
-def main_query(config, args):
+def main_maintenance(config, args):
     records = []
 
-    # Load preprocessed initial records, from merge-and-truncate.
     initial_records = Path().joinpath(
-        config['mhist_root'],
-        'data',
-        'common',
+        config['common_path'],
         'initial_records'
     )
 
     if initial_records.exists():
         records.extend(initial_records.read_text().splitlines())
 
-    per_host_path = PurePath().joinpath(
-        config['mhist_root'],
-        'data',
-        'per-host'
+    merge_timestamp = (datetime.now() - timedelta(days = 31)).timestamp()
+    merged = []
+
+    for per_host_record_file in Path(config['per_host_path']).glob('*/*'):
+        if per_host_record_file.stat().st_mtime < merge_timestamp:
+            merged.append(per_host_record_file)
+            records.extend(Path(per_host_record_file).read_text().splitlines())
+
+    records.sort(key=lambda x: x.split(' ', 1)[0])
+
+    new_initial_records = Path().joinpath(
+        initial_records.parent,
+        initial_records.name + ".tmp"
     )
 
+    new_initial_records.write_text("\n".join(records))
+    new_initial_records.rename(initial_records)
+
+    for per_host_record_file in merged:
+        per_host_record_file.unlink()
+2
+
+def main_query(config, args):
+    records = []
+
+    # Load preprocessed initial records, from merge-and-truncate.
+    initial_records = Path().joinpath(
+        config['common_path'],
+        'initial_records'
+    )
+
+    if initial_records.exists():
+        records.extend(initial_records.read_text().splitlines())
+
     per_host_records = []
-    for per_host_record_file in Path(per_host_path).glob('*/*'):
+    for per_host_record_file in Path(config['per_host_path']).glob('*/*'):
         per_host_records.extend(Path(per_host_record_file).read_text().splitlines())
 
     per_host_records.sort(key=lambda x: x.split(' ', 1)[0])
@@ -256,6 +290,8 @@ def main_dispatcher(config, args, extra_args):
         main_query(config, args)
     elif args.subparser == 'deploy':
         main_deploy(config, args)
+    elif args.subparser == 'maintenance':
+        main_maintenance(config, args)
     else:
         raise
 
@@ -297,6 +333,20 @@ def get_config():
     if user_config.exists():
         config.update(
             json.loads(user_config.read_text())
+        )
+
+    if not 'common_path' in config:
+        config['common_path'] = Path().joinpath(
+            config['mhist_root'],
+            'data',
+            'common',
+        )
+
+    if not 'per_host_path' in config:
+        config['per_host_path'] = PurePath().joinpath(
+            config['mhist_root'],
+            'data',
+            'per-host'
         )
 
     return config
